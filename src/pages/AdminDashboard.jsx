@@ -268,17 +268,29 @@ export default function AdminDashboard() {
           icon={PackageCheck}
           label="Products"
           value={products.length}
+          href="#section-products"
         />
-        <StatCard icon={ShoppingBag} label="Orders" value={orders.length} />
-        <StatCard icon={Users} label="Customers" value={customers.length} />
+        <StatCard
+          icon={ShoppingBag}
+          label="Orders"
+          value={orders.length}
+          href="#section-orders"
+        />
+        <StatCard
+          icon={Users}
+          label="Customers"
+          value={customers.length}
+          href="#section-customers"
+        />
         <StatCard
           icon={MessageSquareText}
           label="Feedback"
           value={feedback.length}
+          href="#section-feedback"
         />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
+      <div id="section-products" className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr] scroll-mt-6">
         <form className="card h-fit p-5" onSubmit={handleProductSubmit}>
           <div className="mb-5 flex items-center justify-between gap-3">
             <div>
@@ -459,7 +471,7 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      <div className="mt-6 grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
+      <div id="section-orders" className="mt-6 grid gap-6 xl:grid-cols-[1.25fr_0.75fr] scroll-mt-6">
         <div className="card overflow-hidden">
           <div className="border-b border-plum/10 p-5">
             <h2 className="font-display text-2xl font-bold text-plum">
@@ -720,7 +732,7 @@ export default function AdminDashboard() {
               )}
             </div>
           </form>
-          <div className="card p-5">
+          <div id="section-customers" className="card p-5 scroll-mt-6">
             <h2 className="font-display text-2xl font-bold text-plum">
               View Customers
             </h2>
@@ -741,7 +753,7 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          <div className="card p-5">
+          <div id="section-feedback" className="card p-5 scroll-mt-6">
             <h2 className="font-display text-2xl font-bold text-plum">
               Recent Feedback
             </h2>
@@ -850,17 +862,28 @@ export default function AdminDashboard() {
   );
 }
 
-function StatCard({ icon: Icon, label, value }) {
+function StatCard({ icon: Icon, label, value, href }) {
+  function handleClick(e) {
+    if (!href) return;
+    e.preventDefault();
+    const target = document.querySelector(href);
+    if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   return (
-    <div className="card flex items-center gap-4 p-5">
-      <span className="grid h-12 w-12 place-items-center rounded-md bg-lavender text-plum">
+    <a
+      href={href || "#"}
+      onClick={handleClick}
+      className="card flex items-center gap-4 p-5 transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 cursor-pointer no-underline"
+    >
+      <span className="grid h-12 w-12 place-items-center rounded-md bg-lavender text-plum transition-colors duration-200 group-hover:bg-plum group-hover:text-white">
         <Icon size={22} />
       </span>
       <div>
         <p className="text-sm font-semibold text-ink/60">{label}</p>
         <p className="font-display text-3xl font-bold text-plum">{value}</p>
       </div>
-    </div>
+    </a>
   );
 }
 

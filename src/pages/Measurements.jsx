@@ -72,9 +72,8 @@ export default function Measurements() {
               key={item}
               type="button"
               onClick={() => setUnit(item)}
-              className={`rounded-md px-4 py-2 text-sm font-bold transition ${
-                unit === item ? "bg-plum text-white" : "text-plum hover:bg-lavender"
-              }`}
+              className={`rounded-md px-4 py-2 text-sm font-bold transition ${unit === item ? "bg-plum text-white" : "text-plum hover:bg-lavender"
+                }`}
             >
               {item}
             </button>
