@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 const viteBin = resolve("node_modules", "vite", "bin", "vite.js");
 
 const children = [
-  spawn(process.execPath, ["server/whatsapp.js"], {
+  spawn(process.execPath, ["backend/index.js"], {
     stdio: "inherit",
     env: process.env,
   }),
