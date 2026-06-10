@@ -99,6 +99,12 @@ export function updateOrderStatus(orderId, status) {
   return updatedOrders;
 }
 
+export function deleteOrder(orderId) {
+  const updatedOrders = getOrders().filter((order) => order.id !== orderId);
+  saveOrders(updatedOrders);
+  return updatedOrders;
+}
+
 export function getFeedback() {
   return read(KEYS.feedback, []);
 }

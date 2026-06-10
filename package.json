@@ -4,7 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "dev": "node --env-file-if-exists=.env server/dev.js",
+    "vite": "vite --host 127.0.0.1",
+    "server": "node --env-file-if-exists=.env server/whatsapp.js",
+    "start": "node --env-file-if-exists=.env server/whatsapp.js",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1"
   },

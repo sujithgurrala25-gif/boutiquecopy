@@ -1,10 +1,10 @@
 import { Link, useParams } from "react-router-dom";
-import { Download, History } from "lucide-react";
+import { History } from "lucide-react";
 import DressPreview from "../components/DressPreview.jsx";
 import EmptyState from "../components/EmptyState.jsx";
-import { buildOrderSummary, downloadTextFile } from "../utils/download.js";
 import { formatPrice } from "../utils/pricing.js";
 import { getOrderById } from "../utils/storage.js";
+
 
 export default function OrderOutput() {
   const { orderId } = useParams();
@@ -23,9 +23,7 @@ export default function OrderOutput() {
     );
   }
 
-  function handleDownload() {
-    downloadTextFile(`stitchaura-${order.id}.txt`, buildOrderSummary(order));
-  }
+
 
   return (
     <section className="page-shell">
@@ -48,6 +46,7 @@ export default function OrderOutput() {
             </div>
 
             <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
+              <Info label="Customer Number" value={order.customerPhone || "N/A"} />
               <Info label="Neck Style" value={order.customization.neckStyle} />
               <Info label="Sleeve Style" value={order.customization.sleeveStyle} />
               <Info label="Fitting Type" value={order.customization.fittingStyle} />
@@ -72,12 +71,8 @@ export default function OrderOutput() {
             <img src={order.fabricImage} alt="Uploaded fabric" className="h-56 w-full object-cover" />
           </div>
 
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <button type="button" onClick={handleDownload} className="btn-secondary flex-1">
-              <Download size={17} />
-              Download Order Summary
-            </button>
-            <Link to="/previous-orders" className="btn-primary flex-1">
+          <div className="mt-4">
+            <Link to="/previous-orders" className="btn-primary w-full">
               <History size={17} />
               Go to Previous Orders
             </Link>

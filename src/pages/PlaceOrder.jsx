@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { CheckCircle2, Download, MessageCircle } from "lucide-react";
+import { CheckCircle2, Phone } from "lucide-react";
 import DressPreview from "../components/DressPreview.jsx";
 import EmptyState from "../components/EmptyState.jsx";
 import LoadingSpinner from "../components/LoadingSpinner.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
-import { buildOrderSummary, downloadTextFile } from "../utils/download.js";
+
 import { estimatePrice, formatPrice } from "../utils/pricing.js";
 import { addOrder, clearDraft, createId, getDraft } from "../utils/storage.js";
 
@@ -15,6 +15,8 @@ export default function PlaceOrder() {
   const draft = useMemo(() => getDraft(user.id), [user.id]);
   const [loading, setLoading] = useState(false);
   const [successOrder, setSuccessOrder] = useState(null);
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [phoneError, setPhoneError] = useState("");
   const price = estimatePrice(draft.selectedOutfit?.id, draft.customization);
   const orderDate = new Date();
 
@@ -45,10 +47,16 @@ export default function PlaceOrder() {
   };
 
   function handleDownloadMeasurements() {
-    downloadTextFile("stitchaura-measurements.txt", buildOrderSummary(previewOrder));
+    // kept for potential future use
   }
 
   function handleConfirm() {
+    const digits = customerPhone.replace(/\D/g, "");
+    if (digits.length < 10) {
+      setPhoneError("Please enter a valid 10-digit mobile number.");
+      return;
+    }
+    setPhoneError("");
     setLoading(true);
     setTimeout(() => {
       const order = {
@@ -56,6 +64,7 @@ export default function PlaceOrder() {
         id: createId("SA").toUpperCase(),
         userId: user.id,
         customerEmail: user.email,
+        customerPhone: digits.length === 10 ? `91${digits}` : digits,
         createdAt: new Date().toISOString(),
       };
       addOrder(order);
@@ -65,9 +74,6 @@ export default function PlaceOrder() {
     }, 700);
   }
 
-  const whatsAppText = encodeURIComponent(
-    `Hello StitchAura Boutique, I want to confirm a ${draft.selectedOutfit.title} stitching order. Estimated price: ${formatPrice(price)}.`
-  );
 
   return (
     <section className="page-shell">
@@ -102,18 +108,36 @@ export default function PlaceOrder() {
             </div>
           </div>
 
-          <div className="mt-6 grid gap-3 sm:grid-cols-3">
-            <button type="button" onClick={handleConfirm} className="btn-primary" disabled={loading}>
+          <div className="mt-5">
+            <label className="grid gap-2 text-sm font-bold text-plum">
+              <span className="flex items-center gap-2">
+                <Phone size={15} />
+                WhatsApp Mobile Number
+              </span>
+              <input
+                className="input-field"
+                type="tel"
+                value={customerPhone}
+                onChange={(e) => {
+                  setCustomerPhone(e.target.value);
+                  setPhoneError("");
+                }}
+                placeholder="e.g. 9876543210"
+                required
+                maxLength={15}
+              />
+            </label>
+            {phoneError && (
+              <p className="mt-2 rounded-md bg-rose/10 px-4 py-2 text-xs font-semibold text-rose">
+                {phoneError}
+              </p>
+            )}
+          </div>
+
+          <div className="mt-6">
+            <button type="button" onClick={handleConfirm} className="btn-primary w-full" disabled={loading}>
               {loading ? <LoadingSpinner label="Confirming" /> : "Confirm Order"}
             </button>
-            <button type="button" onClick={handleDownloadMeasurements} className="btn-secondary">
-              <Download size={17} />
-              Download Measurements
-            </button>
-            <a href={`https://wa.me/?text=${whatsAppText}`} target="_blank" rel="noreferrer" className="btn-secondary">
-              <MessageCircle size={17} />
-              WhatsApp Boutique
-            </a>
           </div>
         </div>
       </div>
