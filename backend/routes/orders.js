@@ -14,10 +14,27 @@ function attachMeasurements(db, orders) {
     const measurementsMap = {};
     for (const m of measurements) measurementsMap[m.field_name] = m.value;
 
+    // Reconstruct the nested `outfit` object expected by the frontend
+    const outfit = {
+      title: order.outfit_title || order.outfit_type,
+      category: order.outfit_category || order.outfit_type,
+      id: (order.outfit_type || "").toLowerCase().replace(/\s+/g, "-"),
+    };
+
     return {
       ...order,
+      outfit,
       extras: order.extras ? JSON.parse(order.extras) : [],
       measurements: measurementsMap,
+      // Friendly aliases used by front-end components
+      price: order.total_price,
+      createdAt: order.created_at,
+      customization: {
+        neckStyle: order.neck_style,
+        sleeveStyle: order.sleeve_style,
+        fittingStyle: order.fitting,
+        extras: order.extras ? JSON.parse(order.extras) : [],
+      },
     };
   });
 }
@@ -68,6 +85,8 @@ router.get("/:id", requireAuth, (req, res) => {
 router.post("/", requireAuth, (req, res) => {
   const {
     outfit_type,
+    outfit_title,
+    outfit_category,
     total_price,
     neck_style,
     sleeve_style,
@@ -75,6 +94,11 @@ router.post("/", requireAuth, (req, res) => {
     extras,
     notes,
     measurements,
+    fabric_image,
+    customer_name,
+    customer_email,
+    customer_phone,
+    unit,
   } = req.body || {};
 
   if (!outfit_type || total_price == null) {
@@ -85,20 +109,34 @@ router.post("/", requireAuth, (req, res) => {
   const orderId = createId("order");
   const now = new Date().toISOString();
 
+  // Resolve customer info — admin may supply it for offline orders
+  const resolvedName  = customer_name  || req.user.name  || null;
+  const resolvedEmail = customer_email || req.user.email || null;
+
   db.run(`
     INSERT INTO orders
-      (id, user_id, outfit_type, total_price, neck_style, sleeve_style, fitting, extras, notes, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (id, user_id, outfit_type, outfit_title, outfit_category,
+       total_price, neck_style, sleeve_style, fitting, extras, notes,
+       fabric_image, customer_name, customer_email, customer_phone, unit,
+       created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     orderId,
     req.user.id,
     outfit_type,
+    outfit_title || outfit_type,
+    outfit_category || outfit_type,
     Number(total_price),
-    neck_style || null,
+    neck_style   || null,
     sleeve_style || null,
-    fitting || null,
+    fitting      || null,
     extras ? JSON.stringify(extras) : null,
-    notes || null,
+    notes        || null,
+    fabric_image || null,
+    resolvedName,
+    resolvedEmail,
+    customer_phone || null,
+    unit || "Inches",
     now,
     now,
   ]);

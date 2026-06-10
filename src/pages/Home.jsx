@@ -1,11 +1,23 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, CalendarCheck, Scissors, Sparkles, Star } from "lucide-react";
 import { boutiqueImages } from "../assets/images.js";
 import { defaultFeedback, outfitOptions, trendingDesigns } from "../utils/data.js";
-import { getFeedback } from "../utils/storage.js";
+import { fetchFeedback } from "../utils/api.js";
 
 export default function Home() {
-  const feedbackCards = [...getFeedback(), ...defaultFeedback].slice(0, 6);
+  const [feedbackCards, setFeedbackCards] = useState([...defaultFeedback].slice(0, 6));
+
+  useEffect(() => {
+    fetchFeedback()
+      .then((data) => {
+        const combined = [...(data.feedback || []), ...defaultFeedback].slice(0, 6);
+        setFeedbackCards(combined);
+      })
+      .catch(() => {
+        // Keep default feedback on error
+      });
+  }, []);
 
   return (
     <>
@@ -116,8 +128,8 @@ export default function Home() {
             <h2 className="section-title">Customer feedback</h2>
           </div>
           <div className="grid gap-5 md:grid-cols-3">
-            {feedbackCards.map((item) => (
-              <article key={item.id} className="card p-5">
+            {feedbackCards.map((item, i) => (
+              <article key={item.id || i} className="card p-5">
                 <div className="mb-4 flex gap-1 text-gold">
                   {Array.from({ length: Number(item.rating) || 5 }).map((_, index) => (
                     <Star key={index} size={18} fill="currentColor" />
@@ -126,7 +138,7 @@ export default function Home() {
                 <p className="text-sm leading-6 text-ink/72">"{item.message}"</p>
                 <div className="mt-5 border-t border-plum/10 pt-4">
                   <p className="font-bold text-plum">{item.name || "Customer"}</p>
-                  <p className="text-xs font-bold uppercase text-rose">{item.outfitType}</p>
+                  <p className="text-xs font-bold uppercase text-rose">{item.outfit_type || item.outfitType}</p>
                 </div>
               </article>
             ))}

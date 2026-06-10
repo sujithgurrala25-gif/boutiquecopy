@@ -1,34 +1,58 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Send, Star } from "lucide-react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { outfitOptions } from "../utils/data.js";
-import { addFeedback, createId, getFeedback } from "../utils/storage.js";
+import { createFeedback, fetchFeedback } from "../utils/api.js";
+import LoadingSpinner from "../components/LoadingSpinner.jsx";
 
 export default function Feedback() {
   const { user } = useAuth();
-  const [feedbackList, setFeedbackList] = useState(() => getFeedback());
+  const [feedbackList, setFeedbackList] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     rating: 5,
     message: "",
     outfitType: outfitOptions[0].title,
   });
   const [success, setSuccess] = useState("");
+  const [error, setError] = useState("");
 
-  function handleSubmit(event) {
+  useEffect(() => {
+    async function load() {
+      try {
+        const data = await fetchFeedback();
+        setFeedbackList(data.feedback || []);
+      } catch {
+        // Show empty state silently
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, []);
+
+  async function handleSubmit(event) {
     event.preventDefault();
-    const feedback = {
-      id: createId("feedback"),
-      userId: user.id,
-      name: user.name,
-      rating: Number(form.rating),
-      message: form.message.trim(),
-      outfitType: form.outfitType,
-      createdAt: new Date().toISOString(),
-    };
-    addFeedback(feedback);
-    setFeedbackList([feedback, ...feedbackList]);
-    setForm({ ...form, rating: 5, message: "" });
-    setSuccess("Thank you for sharing your review.");
+    setError("");
+    setSuccess("");
+    setSubmitting(true);
+
+    try {
+      const data = await createFeedback({
+        name: user.name,
+        outfit_type: form.outfitType,
+        rating: Number(form.rating),
+        message: form.message.trim(),
+      });
+      setFeedbackList([data.feedback, ...feedbackList]);
+      setForm({ ...form, rating: 5, message: "" });
+      setSuccess("Thank you for sharing your review.");
+    } catch (err) {
+      setError(err.message || "Failed to submit feedback.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -85,20 +109,25 @@ export default function Feedback() {
           </label>
 
           {success && <p className="rounded-md bg-lavender px-4 py-3 text-sm font-semibold text-plum">{success}</p>}
-          <button type="submit" className="btn-primary">
-            <Send size={17} />
-            Submit Feedback
+          {error && <p className="rounded-md bg-rose/10 px-4 py-3 text-sm font-semibold text-rose">{error}</p>}
+
+          <button type="submit" className="btn-primary" disabled={submitting}>
+            {submitting ? <LoadingSpinner label="Submitting" /> : <><Send size={17} /> Submit Feedback</>}
           </button>
         </form>
 
         <div className="grid gap-4">
-          {feedbackList.length ? (
+          {loading ? (
+            <div className="card p-8 flex items-center justify-center">
+              <LoadingSpinner label="Loading reviews" />
+            </div>
+          ) : feedbackList.length ? (
             feedbackList.map((item) => (
               <article key={item.id} className="card p-5">
                 <div className="flex flex-col justify-between gap-3 sm:flex-row">
                   <div>
                     <p className="font-bold text-plum">{item.name}</p>
-                    <p className="text-xs font-bold uppercase text-rose">{item.outfitType}</p>
+                    <p className="text-xs font-bold uppercase text-rose">{item.outfit_type || item.outfitType}</p>
                   </div>
                   <div className="flex gap-1 text-gold">
                     {Array.from({ length: item.rating }).map((_, index) => (

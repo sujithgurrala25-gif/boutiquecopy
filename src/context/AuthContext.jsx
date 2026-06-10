@@ -1,88 +1,64 @@
 import { createContext, useContext, useMemo, useState } from "react";
-import { clearSession, createId, getSession, getUsers, saveSession, saveUsers } from "../utils/storage.js";
+import { authLogin, authLogout, authSignup, getToken, removeToken, setToken } from "../utils/api.js";
 
 const AuthContext = createContext(null);
 
-export const ADMIN_CREDENTIALS = {
-  email: "admin@stitchaura.com",
-  password: "admin123",
-};
+/** Read the minimal user object cached after login/signup */
+function readStoredUser() {
+  try {
+    const raw = localStorage.getItem("stitchaura_user");
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
 
-const ADMIN_USER = {
-  id: "admin",
-  name: "Boutique Admin",
-  email: ADMIN_CREDENTIALS.email,
-  role: "admin",
-};
+function storeUser(user) {
+  localStorage.setItem("stitchaura_user", JSON.stringify(user));
+}
+
+function clearStoredUser() {
+  localStorage.removeItem("stitchaura_user");
+}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
-    const session = getSession();
-    return session ? { ...session, role: session.role || "user" } : null;
+    // Restore session only if token still exists
+    if (getToken()) return readStoredUser();
+    return null;
   });
 
-  function signup({ name, email, password }) {
-    const users = getUsers();
-    const normalizedEmail = email.trim().toLowerCase();
-    if (normalizedEmail === ADMIN_CREDENTIALS.email) {
-      return { ok: false, message: "This email is reserved for boutique admin login." };
+  /** Sign up a new user via the API */
+  async function signup({ name, email, password }) {
+    try {
+      const data = await authSignup({ name, email, password });
+      setToken(data.token);
+      storeUser(data.user);
+      setUser(data.user);
+      return { ok: true, user: data.user };
+    } catch (err) {
+      return { ok: false, message: err.message || "Signup failed." };
     }
-
-    const alreadyExists = users.some((item) => item.email === normalizedEmail);
-
-    if (alreadyExists) {
-      return { ok: false, message: "An account with this email already exists." };
-    }
-
-    const newUser = {
-      id: createId("user"),
-      name: name.trim(),
-      email: normalizedEmail,
-      password,
-      role: "user",
-    };
-
-    saveUsers([...users, newUser]);
-    const sessionUser = {
-      id: newUser.id,
-      name: newUser.name,
-      email: newUser.email,
-      role: "user",
-    };
-    saveSession(sessionUser);
-    setUser(sessionUser);
-    return { ok: true, user: sessionUser };
   }
 
-  function login({ email, password }) {
-    const normalizedEmail = email.trim().toLowerCase();
-    if (normalizedEmail === ADMIN_CREDENTIALS.email && password === ADMIN_CREDENTIALS.password) {
-      saveSession(ADMIN_USER);
-      setUser(ADMIN_USER);
-      return { ok: true, user: ADMIN_USER };
+  /** Log in via the API */
+  async function login({ email, password }) {
+    try {
+      const data = await authLogin({ email, password });
+      setToken(data.token);
+      storeUser(data.user);
+      setUser(data.user);
+      return { ok: true, user: data.user };
+    } catch (err) {
+      return { ok: false, message: err.message || "Login failed." };
     }
-
-    const match = getUsers().find(
-      (item) => item.email === normalizedEmail && item.password === password
-    );
-
-    if (!match) {
-      return { ok: false, message: "Invalid email or password." };
-    }
-
-    const sessionUser = {
-      id: match.id,
-      name: match.name,
-      email: match.email,
-      role: match.role || "user",
-    };
-    saveSession(sessionUser);
-    setUser(sessionUser);
-    return { ok: true, user: sessionUser };
   }
 
-  function logout() {
-    clearSession();
+  /** Log out — clear token + cached user */
+  async function logout() {
+    try { await authLogout(); } catch { /* ignore */ }
+    removeToken();
+    clearStoredUser();
     setUser(null);
   }
 

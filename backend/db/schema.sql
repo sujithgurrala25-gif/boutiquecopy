@@ -39,19 +39,26 @@ CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
 -- ORDERS
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS orders (
-  id           TEXT PRIMARY KEY,
-  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  outfit_type  TEXT NOT NULL,
-  status       TEXT NOT NULL DEFAULT 'Order Received'
-                 CHECK (status IN ('Order Received','Cutting','Stitching','Ready','Delivered')),
-  total_price  REAL NOT NULL DEFAULT 0,
-  neck_style   TEXT,
-  sleeve_style TEXT,
-  fitting      TEXT,
-  extras       TEXT,   -- JSON array stored as text
-  notes        TEXT,
-  created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  outfit_type     TEXT NOT NULL,
+  outfit_title    TEXT,
+  outfit_category TEXT,
+  status          TEXT NOT NULL DEFAULT 'Order Received'
+                    CHECK (status IN ('Order Received','Cutting','Stitching','Ready','Delivered')),
+  total_price     REAL NOT NULL DEFAULT 0,
+  neck_style      TEXT,
+  sleeve_style    TEXT,
+  fitting         TEXT,
+  extras          TEXT,   -- JSON array stored as text
+  notes           TEXT,
+  fabric_image    TEXT,
+  customer_name   TEXT,
+  customer_email  TEXT,
+  customer_phone  TEXT,
+  unit            TEXT DEFAULT 'Inches',
+  created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_orders_user    ON orders(user_id);

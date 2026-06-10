@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Edit3,
@@ -7,6 +7,7 @@ import {
   MessageCircle,
   PackageCheck,
   Plus,
+  RefreshCw,
   Save,
   ShoppingBag,
   Trash2,
@@ -17,19 +18,20 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { orderStatusOptions } from "../utils/data.js";
 import { formatPrice } from "../utils/pricing.js";
 import {
-  addProduct,
+  createOrder,
+  createProduct,
   deleteOrder,
+  deleteFeedback,
   deleteProduct,
-  getFeedback,
-  getOrders,
-  getProducts,
-  getUsers,
-  addOrder,
-  createId,
+  fetchFeedback,
+  fetchOrders,
+  fetchProducts,
+  fetchUsers,
   updateOrderStatus,
   updateProduct,
-} from "../utils/storage.js";
+} from "../utils/api.js";
 import { buildWhatsAppOrderLink, buildWhatsAppReadyMessage } from "../utils/whatsapp.js";
+import LoadingSpinner from "../components/LoadingSpinner.jsx";
 
 const emptyProductForm = {
   name: "",
@@ -54,40 +56,48 @@ const emptyOfflineForm = {
 };
 
 export default function AdminDashboard() {
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [products, setProducts] = useState(() => getProducts());
-  const [orders, setOrders] = useState(() => getOrders());
-  const activeOrders = useMemo(() => orders.filter((o) => o.status !== "Delivered"), [orders]);
+
+  const [products, setProducts]   = useState([]);
+  const [orders, setOrders]       = useState([]);
+  const [feedback, setFeedback]   = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [loading, setLoading]     = useState(true);
+
+  const activeOrders    = useMemo(() => orders.filter((o) => o.status !== "Delivered"), [orders]);
   const deliveredOrders = useMemo(() => orders.filter((o) => o.status === "Delivered"), [orders]);
-  const [feedback, setFeedback] = useState(() => getFeedback());
-  const [customers, setCustomers] = useState(() =>
-    getUsers().filter((user) => (user.role || "user") === "user"),
-  );
-  const [form, setForm] = useState(emptyProductForm);
-  const [editingId, setEditingId] = useState("");
+
+  const [form, setForm]             = useState(emptyProductForm);
+  const [editingId, setEditingId]   = useState("");
   const [offlineForm, setOfflineForm] = useState(emptyOfflineForm);
   const [whatsAppStatus, setWhatsAppStatus] = useState(null);
 
-  // Re-read orders from localStorage periodically so admin sees new online orders
-  useEffect(() => {
-    function refreshData() {
-      setOrders(getOrders());
-      setFeedback(getFeedback());
-      setCustomers(getUsers().filter((u) => (u.role || "user") === "user"));
+  const loadAll = useCallback(async () => {
+    try {
+      const [prodData, ordData, fbData, usrData] = await Promise.all([
+        fetchProducts(),
+        fetchOrders(),
+        fetchFeedback(),
+        fetchUsers(),
+      ]);
+      setProducts(prodData.products || []);
+      setOrders(ordData.orders || []);
+      setFeedback(fbData.feedback || []);
+      setCustomers((usrData.users || []).filter((u) => u.role === "user"));
+    } catch (err) {
+      console.error("Admin load error:", err);
+    } finally {
+      setLoading(false);
     }
-
-    const interval = setInterval(refreshData, 3000);
-    window.addEventListener("focus", refreshData);
-
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener("focus", refreshData);
-    };
   }, []);
 
-  function handleLogout() {
-    logout();
+  useEffect(() => {
+    loadAll();
+  }, [loadAll]);
+
+  async function handleLogout() {
+    await logout();
     navigate("/login");
   }
 
@@ -108,81 +118,90 @@ export default function AdminDashboard() {
     setOfflineForm(emptyOfflineForm);
   }
 
-  function handleOfflineSubmit(event) {
+  async function handleOfflineSubmit(event) {
     event.preventDefault();
     setWhatsAppStatus(null);
 
-    const order = {
-      id: createId("order"),
-      customerName: offlineForm.customerName.trim(),
-      customerEmail: offlineForm.customerEmail.trim(),
-      customerPhone: offlineForm.customerPhone.trim(),
-      outfit: {
-        title:
-          offlineForm.outfitTitle.trim() ||
-          `${offlineForm.outfitCategory} - Custom`,
-        category: offlineForm.outfitCategory,
-      },
-      price: Number(offlineForm.price) || 0,
-      fabricImage: offlineForm.fabricImage.trim() || boutiqueImages.intro,
-      customization: {
-        neckStyle: offlineForm.neckStyle,
-        sleeveStyle: offlineForm.sleeveStyle,
-        fittingStyle: offlineForm.fittingStyle,
-      },
-      status: "Order Received",
-      createdAt: new Date().toISOString(),
-    };
-
-    addOrder(order);
-    setOrders(getOrders());
-
     try {
-      window.open(buildWhatsAppOrderLink(order), "_blank", "noopener,noreferrer");
-      setWhatsAppStatus({
-        type: "success",
-        message: "Order saved and WhatsApp opened to the customer's number.",
-      });
+      const payload = {
+        outfit_type: offlineForm.outfitCategory,
+        outfit_title: offlineForm.outfitTitle.trim() || `${offlineForm.outfitCategory} - Custom`,
+        outfit_category: offlineForm.outfitCategory,
+        total_price: Number(offlineForm.price) || 0,
+        neck_style: offlineForm.neckStyle,
+        sleeve_style: offlineForm.sleeveStyle,
+        fitting: offlineForm.fittingStyle,
+        fabric_image: offlineForm.fabricImage.trim() || boutiqueImages.intro,
+        customer_name: offlineForm.customerName.trim(),
+        customer_email: offlineForm.customerEmail.trim(),
+        customer_phone: offlineForm.customerPhone.trim(),
+      };
+
+      const data = await createOrder(payload);
+      const newOrder = data.order;
+
+      // Reconstruct the shape WhatsApp util expects
+      const orderForWA = {
+        ...newOrder,
+        outfit: { title: newOrder.outfit?.title || payload.outfit_title },
+        fabricImage: payload.fabric_image,
+        customerName: payload.customer_name,
+        customerPhone: payload.customer_phone,
+        customization: newOrder.customization,
+        price: payload.total_price,
+      };
+
+      setOrders((prev) => [newOrder, ...prev]);
       resetOfflineForm();
-    } catch (error) {
-      setWhatsAppStatus({
-        type: "error",
-        message: `Order saved, but WhatsApp could not open: ${error.message}`,
-      });
+
+      window.open(buildWhatsAppOrderLink(orderForWA), "_blank", "noopener,noreferrer");
+      setWhatsAppStatus({ type: "success", message: "Order saved and WhatsApp opened to the customer's number." });
+    } catch (err) {
+      setWhatsAppStatus({ type: "error", message: err.message || "Failed to save order." });
     }
   }
 
   function handleSendWhatsApp(order) {
     try {
-      window.open(buildWhatsAppOrderLink(order), "_blank", "noopener,noreferrer");
-      setWhatsAppStatus({
-        type: "success",
-        message: "WhatsApp opened to the customer's number with order details.",
-      });
-    } catch (error) {
-      setWhatsAppStatus({
-        type: "error",
-        message: `Could not open WhatsApp: ${error.message}`,
-      });
+      const orderForWA = {
+        ...order,
+        outfit: order.outfit || { title: order.outfit_type },
+        fabricImage: order.fabric_image,
+        customerName: order.customer_name,
+        customerPhone: order.customer_phone,
+        customization: order.customization,
+        price: order.price || order.total_price,
+      };
+      window.open(buildWhatsAppOrderLink(orderForWA), "_blank", "noopener,noreferrer");
+      setWhatsAppStatus({ type: "success", message: "WhatsApp opened to the customer's number with order details." });
+    } catch (err) {
+      setWhatsAppStatus({ type: "error", message: `Could not open WhatsApp: ${err.message}` });
     }
   }
 
-  function handleProductSubmit(event) {
+  async function handleProductSubmit(event) {
     event.preventDefault();
     const productData = {
-      ...form,
+      name: form.name,
+      category: form.category,
       price: Number(form.price),
       stock: Number(form.stock),
-      image: form.image || boutiqueImages.intro,
+      image_url: form.image || boutiqueImages.intro,
+      description: form.description,
     };
 
-    if (editingId) {
-      setProducts(updateProduct(editingId, productData));
-    } else {
-      setProducts(addProduct(productData));
+    try {
+      if (editingId) {
+        const data = await updateProduct(editingId, productData);
+        setProducts((prev) => prev.map((p) => p.id === editingId ? data.product : p));
+      } else {
+        const data = await createProduct(productData);
+        setProducts((prev) => [data.product, ...prev]);
+      }
+      resetForm();
+    } catch (err) {
+      console.error("Product save error:", err);
     }
-
-    resetForm();
   }
 
   function handleEditProduct(product) {
@@ -192,114 +211,106 @@ export default function AdminDashboard() {
       category: product.category,
       price: String(product.price),
       stock: String(product.stock),
-      image: product.image,
-      description: product.description,
+      image: product.image_url || product.image || "",
+      description: product.description || "",
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function handleDeleteProduct(productId) {
-    setProducts(deleteProduct(productId));
-    if (editingId === productId) resetForm();
-  }
-
-  function handleStatusChange(orderId, status) {
-    setOrders(updateOrderStatus(orderId, status));
-
-    if (status === "Ready") {
-      const order = getOrders().find((o) => o.id === orderId);
-      if (order?.customerPhone) {
-        try {
-          const readyMessage = buildWhatsAppReadyMessage(order);
-          window.open(
-            buildWhatsAppOrderLink(order, readyMessage),
-            "_blank",
-            "noopener,noreferrer",
-          );
-          setWhatsAppStatus({
-            type: "success",
-            message: `Order ${orderId} marked as Ready. WhatsApp opened to notify the customer.`,
-          });
-        } catch (error) {
-          setWhatsAppStatus({
-            type: "error",
-            message: `Order updated, but could not open WhatsApp: ${error.message}`,
-          });
-        }
-      }
+  async function handleDeleteProduct(productId) {
+    try {
+      await deleteProduct(productId);
+      setProducts((prev) => prev.filter((p) => p.id !== productId));
+      if (editingId === productId) resetForm();
+    } catch (err) {
+      console.error("Delete product error:", err);
     }
   }
 
-  function handleDeleteOrder(order) {
-    const confirmed = window.confirm(
-      `Delete order ${order.id} for ${order.customerName}? This cannot be undone.`,
-    );
+  async function handleStatusChange(orderId, status) {
+    try {
+      const data = await updateOrderStatus(orderId, status);
+      const updatedOrder = data.order;
+      setOrders((prev) => prev.map((o) => o.id === orderId ? updatedOrder : o));
 
+      if (status === "Ready" && updatedOrder.customer_phone) {
+        const orderForWA = {
+          ...updatedOrder,
+          outfit: updatedOrder.outfit || { title: updatedOrder.outfit_type },
+          fabricImage: updatedOrder.fabric_image,
+          customerName: updatedOrder.customer_name,
+          customerPhone: updatedOrder.customer_phone,
+          customization: updatedOrder.customization,
+          price: updatedOrder.price,
+        };
+        const readyMessage = buildWhatsAppReadyMessage(orderForWA);
+        window.open(buildWhatsAppOrderLink(orderForWA, readyMessage), "_blank", "noopener,noreferrer");
+        setWhatsAppStatus({ type: "success", message: `Order ${orderId} marked as Ready. WhatsApp opened to notify the customer.` });
+      }
+    } catch (err) {
+      console.error("Status update error:", err);
+    }
+  }
+
+  async function handleDeleteOrder(order) {
+    const confirmed = window.confirm(
+      `Delete order ${order.id} for ${order.customer_name || order.customerName}? This cannot be undone.`
+    );
     if (!confirmed) return;
 
-    setOrders(deleteOrder(order.id));
-    setWhatsAppStatus({
-      type: "success",
-      message: `Order ${order.id} deleted.`,
-    });
+    try {
+      await deleteOrder(order.id);
+      setOrders((prev) => prev.filter((o) => o.id !== order.id));
+      setWhatsAppStatus({ type: "success", message: `Order ${order.id} deleted.` });
+    } catch (err) {
+      setWhatsAppStatus({ type: "error", message: err.message || "Failed to delete order." });
+    }
+  }
+
+  if (loading) {
+    return (
+      <section className="page-shell flex items-center justify-center min-h-[60vh]">
+        <LoadingSpinner label="Loading dashboard" />
+      </section>
+    );
   }
 
   return (
     <section className="page-shell">
       <div className="mb-8 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
         <div>
-          <p className="mb-3 text-sm font-bold uppercase text-gold">
-            Admin Dashboard
-          </p>
+          <p className="mb-3 text-sm font-bold uppercase text-gold">Admin Dashboard</p>
           <h1 className="section-title">Boutique management panel</h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
-            Manage products, monitor orders, update stitching status, and review
-            customer activity.
+            Manage products, monitor orders, update stitching status, and review customer activity.
           </p>
         </div>
-        <button type="button" onClick={handleLogout} className="btn-secondary">
-          <LogOut size={17} />
-          Logout
-        </button>
+        <div className="flex gap-3">
+          <button type="button" onClick={loadAll} className="btn-secondary">
+            <RefreshCw size={17} />
+            Refresh
+          </button>
+          <button type="button" onClick={handleLogout} className="btn-secondary">
+            <LogOut size={17} />
+            Logout
+          </button>
+        </div>
       </div>
 
       <div className="mb-6 grid gap-4 md:grid-cols-4">
-        <StatCard
-          icon={PackageCheck}
-          label="Products"
-          value={products.length}
-          href="#section-products"
-        />
-        <StatCard
-          icon={ShoppingBag}
-          label="Orders"
-          value={orders.length}
-          href="#section-orders"
-        />
-        <StatCard
-          icon={Users}
-          label="Customers"
-          value={customers.length}
-          href="#section-customers"
-        />
-        <StatCard
-          icon={MessageSquareText}
-          label="Feedback"
-          value={feedback.length}
-          href="#section-feedback"
-        />
+        <StatCard icon={PackageCheck} label="Products"  value={products.length}  href="#section-products" />
+        <StatCard icon={ShoppingBag} label="Orders"    value={orders.length}    href="#section-orders" />
+        <StatCard icon={Users}       label="Customers" value={customers.length} href="#section-customers" />
+        <StatCard icon={MessageSquareText} label="Feedback" value={feedback.length} href="#section-feedback" />
       </div>
 
+      {/* ── Products ─────────────────────────────────────────── */}
       <div id="section-products" className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr] scroll-mt-6">
         <form className="card h-fit p-5" onSubmit={handleProductSubmit}>
           <div className="mb-5 flex items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-bold uppercase text-gold">
-                {editingId ? "Edit product" : "Add product"}
-              </p>
-              <h2 className="font-display text-2xl font-bold text-plum">
-                Product Form
-              </h2>
+              <p className="text-xs font-bold uppercase text-gold">{editingId ? "Edit product" : "Add product"}</p>
+              <h2 className="font-display text-2xl font-bold text-plum">Product Form</h2>
             </div>
             <span className="grid h-11 w-11 place-items-center rounded-md bg-lavender text-plum">
               {editingId ? <Edit3 size={20} /> : <Plus size={20} />}
@@ -309,78 +320,35 @@ export default function AdminDashboard() {
           <div className="grid gap-4">
             <label className="grid gap-2 text-sm font-bold text-plum">
               Product Name
-              <input
-                className="input-field"
-                name="name"
-                value={form.name}
-                onChange={handleFormChange}
-                required
-              />
+              <input className="input-field" name="name" value={form.name} onChange={handleFormChange} required />
             </label>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="grid gap-2 text-sm font-bold text-plum">
                 Category
-                <select
-                  className="input-field"
-                  name="category"
-                  value={form.category}
-                  onChange={handleFormChange}
-                >
-                  {["Blouse", "Kurti", "Long Frock", "Lehenga"].map(
-                    (category) => (
-                      <option key={category}>{category}</option>
-                    ),
-                  )}
+                <select className="input-field" name="category" value={form.category} onChange={handleFormChange}>
+                  {["Blouse", "Kurti", "Long Frock", "Lehenga"].map((c) => <option key={c}>{c}</option>)}
                 </select>
               </label>
               <label className="grid gap-2 text-sm font-bold text-plum">
                 Stock
-                <input
-                  className="input-field"
-                  type="number"
-                  min="0"
-                  name="stock"
-                  value={form.stock}
-                  onChange={handleFormChange}
-                  required
-                />
+                <input className="input-field" type="number" min="0" name="stock" value={form.stock} onChange={handleFormChange} required />
               </label>
             </div>
 
             <label className="grid gap-2 text-sm font-bold text-plum">
               Price
-              <input
-                className="input-field"
-                type="number"
-                min="1"
-                name="price"
-                value={form.price}
-                onChange={handleFormChange}
-                required
-              />
+              <input className="input-field" type="number" min="1" name="price" value={form.price} onChange={handleFormChange} required />
             </label>
 
             <label className="grid gap-2 text-sm font-bold text-plum">
               Image URL
-              <input
-                className="input-field"
-                name="image"
-                value={form.image}
-                onChange={handleFormChange}
-                placeholder="https://..."
-              />
+              <input className="input-field" name="image" value={form.image} onChange={handleFormChange} placeholder="https://..." />
             </label>
 
             <label className="grid gap-2 text-sm font-bold text-plum">
               Description
-              <textarea
-                className="input-field min-h-28 resize-y"
-                name="description"
-                value={form.description}
-                onChange={handleFormChange}
-                required
-              />
+              <textarea className="input-field min-h-28 resize-y" name="description" value={form.description} onChange={handleFormChange} required />
             </label>
 
             <div className="flex flex-col gap-3 sm:flex-row">
@@ -389,13 +357,7 @@ export default function AdminDashboard() {
                 {editingId ? "Update Product" : "Add Product"}
               </button>
               {editingId && (
-                <button
-                  type="button"
-                  onClick={resetForm}
-                  className="btn-secondary flex-1"
-                >
-                  Cancel
-                </button>
+                <button type="button" onClick={resetForm} className="btn-secondary flex-1">Cancel</button>
               )}
             </div>
           </div>
@@ -403,60 +365,31 @@ export default function AdminDashboard() {
 
         <div className="card overflow-hidden">
           <div className="border-b border-plum/10 p-5">
-            <h2 className="font-display text-2xl font-bold text-plum">
-              View All Products
-            </h2>
+            <h2 className="font-display text-2xl font-bold text-plum">View All Products</h2>
           </div>
           {products.length ? (
             <div className="divide-y divide-plum/10">
               {products.map((product) => (
-                <article
-                  key={product.id}
-                  className="grid gap-4 p-5 md:grid-cols-[130px_1fr]"
-                >
-                  <img
-                    src={product.image || boutiqueImages.intro}
-                    alt={product.name}
-                    className="h-32 w-full rounded-lg object-cover"
-                  />
+                <article key={product.id} className="grid gap-4 p-5 md:grid-cols-[130px_1fr]">
+                  <img src={product.image_url || product.image || boutiqueImages.intro} alt={product.name} className="h-32 w-full rounded-lg object-cover" />
                   <div>
                     <div className="flex flex-col justify-between gap-3 sm:flex-row">
                       <div>
-                        <p className="text-xs font-bold uppercase text-gold">
-                          {product.category}
-                        </p>
-                        <h3 className="font-display text-2xl font-bold text-plum">
-                          {product.name}
-                        </h3>
-                        <p className="mt-1 text-sm leading-6 text-ink/65">
-                          {product.description}
-                        </p>
+                        <p className="text-xs font-bold uppercase text-gold">{product.category}</p>
+                        <h3 className="font-display text-2xl font-bold text-plum">{product.name}</h3>
+                        <p className="mt-1 text-sm leading-6 text-ink/65">{product.description}</p>
                       </div>
                       <div className="shrink-0 text-left sm:text-right">
-                        <p className="text-lg font-bold text-rose">
-                          {formatPrice(product.price)}
-                        </p>
-                        <p className="text-xs font-bold uppercase text-ink/50">
-                          Stock: {product.stock}
-                        </p>
+                        <p className="text-lg font-bold text-rose">{formatPrice(product.price)}</p>
+                        <p className="text-xs font-bold uppercase text-ink/50">Stock: {product.stock}</p>
                       </div>
                     </div>
                     <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-                      <button
-                        type="button"
-                        onClick={() => handleEditProduct(product)}
-                        className="btn-secondary flex-1"
-                      >
-                        <Edit3 size={17} />
-                        Edit Product
+                      <button type="button" onClick={() => handleEditProduct(product)} className="btn-secondary flex-1">
+                        <Edit3 size={17} /> Edit Product
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteProduct(product.id)}
-                        className="btn-secondary flex-1"
-                      >
-                        <Trash2 size={17} />
-                        Delete Product
+                      <button type="button" onClick={() => handleDeleteProduct(product.id)} className="btn-secondary flex-1">
+                        <Trash2 size={17} /> Delete Product
                       </button>
                     </div>
                   </div>
@@ -464,43 +397,29 @@ export default function AdminDashboard() {
               ))}
             </div>
           ) : (
-            <div className="p-8 text-center text-sm text-ink/60">
-              No products available. Add your first product.
-            </div>
+            <div className="p-8 text-center text-sm text-ink/60">No products available. Add your first product.</div>
           )}
         </div>
       </div>
 
+      {/* ── Orders ───────────────────────────────────────────── */}
       <div id="section-orders" className="mt-6 grid gap-6 xl:grid-cols-[1.25fr_0.75fr] scroll-mt-6">
         <div className="card overflow-hidden">
           <div className="border-b border-plum/10 p-5">
-            <h2 className="font-display text-2xl font-bold text-plum">
-              Active Orders
-            </h2>
+            <h2 className="font-display text-2xl font-bold text-plum">Active Orders</h2>
           </div>
           {activeOrders.length ? (
             <div className="divide-y divide-plum/10">
               {activeOrders.map((order) => (
-                <article
-                  key={order.id}
-                  className="grid gap-4 p-5 lg:grid-cols-[140px_1fr]"
-                >
-                  <img
-                    src={order.fabricImage}
-                    alt="Uploaded fabric"
-                    className="h-36 w-full rounded-lg object-cover"
-                  />
+                <article key={order.id} className="grid gap-4 p-5 lg:grid-cols-[140px_1fr]">
+                  <img src={order.fabric_image || order.fabricImage} alt="Uploaded fabric" className="h-36 w-full rounded-lg object-cover" />
                   <div>
                     <div className="flex flex-col justify-between gap-3 sm:flex-row">
                       <div>
-                        <p className="text-xs font-bold uppercase text-gold">
-                          {order.id}
-                        </p>
-                        <h3 className="font-display text-2xl font-bold text-plum">
-                          {order.outfit.title}
-                        </h3>
+                        <p className="text-xs font-bold uppercase text-gold">{order.id}</p>
+                        <h3 className="font-display text-2xl font-bold text-plum">{order.outfit?.title || order.outfit_type}</h3>
                         <p className="text-sm text-ink/58">
-                          {order.customerName} · {order.customerEmail}
+                          {order.customer_name || order.user_name} · {order.customer_email || order.user_email}
                         </p>
                       </div>
                       <label className="grid gap-2 text-sm font-bold text-plum">
@@ -508,53 +427,27 @@ export default function AdminDashboard() {
                         <select
                           className="input-field max-w-56"
                           value={order.status}
-                          onChange={(event) =>
-                            handleStatusChange(order.id, event.target.value)
-                          }
+                          onChange={(e) => handleStatusChange(order.id, e.target.value)}
                         >
-                          {orderStatusOptions.map((status) => (
-                            <option key={status}>{status}</option>
-                          ))}
+                          {orderStatusOptions.map((s) => <option key={s}>{s}</option>)}
                         </select>
                       </label>
                     </div>
 
                     <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                      <Info label="Price" value={formatPrice(order.price)} />
-                      <Info
-                        label="Phone"
-                        value={order.customerPhone || "N/A"}
-                      />
-                      <Info
-                        label="Neck"
-                        value={order.customization?.neckStyle || "N/A"}
-                      />
-                      <Info
-                        label="Sleeve"
-                        value={order.customization?.sleeveStyle || "N/A"}
-                      />
-                      <Info
-                        label="Fitting"
-                        value={order.customization?.fittingStyle || "N/A"}
-                      />
+                      <Info label="Price"   value={formatPrice(order.price)} />
+                      <Info label="Phone"   value={order.customer_phone || order.customerPhone || "N/A"} />
+                      <Info label="Neck"    value={order.customization?.neckStyle || "N/A"} />
+                      <Info label="Sleeve"  value={order.customization?.sleeveStyle || "N/A"} />
+                      <Info label="Fitting" value={order.customization?.fittingStyle || "N/A"} />
                     </div>
 
                     <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-                      <button
-                        type="button"
-                        onClick={() => handleSendWhatsApp(order)}
-                        className="btn-secondary flex-1"
-                      >
-                        <MessageCircle size={17} />
-                        Send WhatsApp
+                      <button type="button" onClick={() => handleSendWhatsApp(order)} className="btn-secondary flex-1">
+                        <MessageCircle size={17} /> Send WhatsApp
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteOrder(order)}
-                        className="btn-secondary flex-1"
-                      >
-                        <Trash2 size={17} />
-                        Delete Order
+                      <button type="button" onClick={() => handleDeleteOrder(order)} className="btn-secondary flex-1">
+                        <Trash2 size={17} /> Delete Order
                       </button>
                     </div>
                   </div>
@@ -562,187 +455,97 @@ export default function AdminDashboard() {
               ))}
             </div>
           ) : (
-            <div className="p-8 text-center text-sm text-ink/60">
-              No active orders.
-            </div>
+            <div className="p-8 text-center text-sm text-ink/60">No active orders.</div>
           )}
         </div>
 
         <div className="grid gap-6">
+          {/* ── Add Offline Customer Order ── */}
           <form className="card p-5" onSubmit={handleOfflineSubmit}>
-            <h2 className="font-display text-2xl font-bold text-plum">
-              Add Offline Customer Order
-            </h2>
-            <p className="mt-2 text-sm text-ink/60">
-              Enter customer details and product for offline customers.
-            </p>
+            <h2 className="font-display text-2xl font-bold text-plum">Add Offline Customer Order</h2>
+            <p className="mt-2 text-sm text-ink/60">Enter customer details and product for offline customers.</p>
 
             <div className="mt-4 grid gap-3">
               <label className="grid gap-2 text-sm font-bold text-plum">
                 Customer Name
-                <input
-                  className="input-field"
-                  name="customerName"
-                  value={offlineForm.customerName}
-                  onChange={handleOfflineChange}
-                  required
-                />
+                <input className="input-field" name="customerName" value={offlineForm.customerName} onChange={handleOfflineChange} required />
               </label>
-
               <label className="grid gap-2 text-sm font-bold text-plum">
                 Email
-                <input
-                  className="input-field"
-                  type="email"
-                  name="customerEmail"
-                  value={offlineForm.customerEmail}
-                  onChange={handleOfflineChange}
-                />
+                <input className="input-field" type="email" name="customerEmail" value={offlineForm.customerEmail} onChange={handleOfflineChange} />
               </label>
-
               <label className="grid gap-2 text-sm font-bold text-plum">
                 WhatsApp Mobile Number
-                <input
-                  className="input-field"
-                  name="customerPhone"
-                  value={offlineForm.customerPhone}
-                  onChange={handleOfflineChange}
-                  placeholder="9876543210 or 919876543210"
-                  required
-                />
+                <input className="input-field" name="customerPhone" value={offlineForm.customerPhone} onChange={handleOfflineChange} placeholder="9876543210 or 919876543210" required />
               </label>
-
               <label className="grid gap-2 text-sm font-bold text-plum">
                 Outfit Title (optional)
-                <input
-                  className="input-field"
-                  name="outfitTitle"
-                  value={offlineForm.outfitTitle}
-                  onChange={handleOfflineChange}
-                />
+                <input className="input-field" name="outfitTitle" value={offlineForm.outfitTitle} onChange={handleOfflineChange} />
               </label>
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="grid gap-2 text-sm font-bold text-plum">
                   Category
-                  <select
-                    className="input-field"
-                    name="outfitCategory"
-                    value={offlineForm.outfitCategory}
-                    onChange={handleOfflineChange}
-                  >
-                    {["Blouse", "Kurti", "Long Frock", "Lehenga"].map((c) => (
-                      <option key={c}>{c}</option>
-                    ))}
+                  <select className="input-field" name="outfitCategory" value={offlineForm.outfitCategory} onChange={handleOfflineChange}>
+                    {["Blouse", "Kurti", "Long Frock", "Lehenga"].map((c) => <option key={c}>{c}</option>)}
                   </select>
                 </label>
-
                 <label className="grid gap-2 text-sm font-bold text-plum">
                   Price
-                  <input
-                    className="input-field"
-                    type="number"
-                    min="0"
-                    name="price"
-                    value={offlineForm.price}
-                    onChange={handleOfflineChange}
-                  />
+                  <input className="input-field" type="number" min="0" name="price" value={offlineForm.price} onChange={handleOfflineChange} />
                 </label>
               </div>
 
               <label className="grid gap-2 text-sm font-bold text-plum">
                 Fabric Image URL (optional)
-                <input
-                  className="input-field"
-                  name="fabricImage"
-                  value={offlineForm.fabricImage}
-                  onChange={handleOfflineChange}
-                  placeholder="https://..."
-                />
+                <input className="input-field" name="fabricImage" value={offlineForm.fabricImage} onChange={handleOfflineChange} placeholder="https://..." />
               </label>
 
               <div className="grid gap-4 sm:grid-cols-3">
                 <label className="grid gap-2 text-sm font-bold text-plum">
                   Neck
-                  <select
-                    className="input-field"
-                    name="neckStyle"
-                    value={offlineForm.neckStyle}
-                    onChange={handleOfflineChange}
-                  >
-                    {["Round", "V-neck", "Boat"].map((n) => (
-                      <option key={n}>{n}</option>
-                    ))}
+                  <select className="input-field" name="neckStyle" value={offlineForm.neckStyle} onChange={handleOfflineChange}>
+                    {["Round", "V-neck", "Boat"].map((n) => <option key={n}>{n}</option>)}
                   </select>
                 </label>
-
                 <label className="grid gap-2 text-sm font-bold text-plum">
                   Sleeve
-                  <select
-                    className="input-field"
-                    name="sleeveStyle"
-                    value={offlineForm.sleeveStyle}
-                    onChange={handleOfflineChange}
-                  >
-                    {["Short", "3/4", "Full"].map((s) => (
-                      <option key={s}>{s}</option>
-                    ))}
+                  <select className="input-field" name="sleeveStyle" value={offlineForm.sleeveStyle} onChange={handleOfflineChange}>
+                    {["Short", "3/4", "Full"].map((s) => <option key={s}>{s}</option>)}
                   </select>
                 </label>
-
                 <label className="grid gap-2 text-sm font-bold text-plum">
                   Fitting
-                  <select
-                    className="input-field"
-                    name="fittingStyle"
-                    value={offlineForm.fittingStyle}
-                    onChange={handleOfflineChange}
-                  >
-                    {["Regular", "Slim", "Loose"].map((f) => (
-                      <option key={f}>{f}</option>
-                    ))}
+                  <select className="input-field" name="fittingStyle" value={offlineForm.fittingStyle} onChange={handleOfflineChange}>
+                    {["Regular", "Slim", "Loose"].map((f) => <option key={f}>{f}</option>)}
                   </select>
                 </label>
               </div>
 
               <div className="mt-3 flex gap-3">
                 <button type="submit" className="btn-primary flex-1">
-                  <Save size={17} />
-                  Save & Send WhatsApp
+                  <Save size={17} /> Save & Send WhatsApp
                 </button>
-                <button
-                  type="button"
-                  onClick={resetOfflineForm}
-                  className="btn-secondary"
-                >
-                  Cancel
-                </button>
+                <button type="button" onClick={resetOfflineForm} className="btn-secondary">Cancel</button>
               </div>
 
               {whatsAppStatus && (
-                <p
-                  className={`rounded-md px-4 py-3 text-sm font-semibold ${
-                    whatsAppStatus.type === "success"
-                      ? "bg-green-50 text-green-700"
-                      : "bg-rose/10 text-rose"
-                  }`}
-                >
+                <p className={`rounded-md px-4 py-3 text-sm font-semibold ${
+                  whatsAppStatus.type === "success" ? "bg-green-50 text-green-700" : "bg-rose/10 text-rose"
+                }`}>
                   {whatsAppStatus.message}
                 </p>
               )}
             </div>
           </form>
+
+          {/* ── Customers ── */}
           <div id="section-customers" className="card p-5 scroll-mt-6">
-            <h2 className="font-display text-2xl font-bold text-plum">
-              View Customers
-            </h2>
+            <h2 className="font-display text-2xl font-bold text-plum">View Customers</h2>
             <div className="mt-4 grid gap-3">
               {customers.length ? (
                 customers.map((customer) => (
-                  <article
-                    key={customer.id}
-                    className="rounded-lg bg-cream p-4"
-                  >
+                  <article key={customer.id} className="rounded-lg bg-cream p-4">
                     <p className="font-bold text-plum">{customer.name}</p>
                     <p className="text-sm text-ink/60">{customer.email}</p>
                   </article>
@@ -753,21 +556,16 @@ export default function AdminDashboard() {
             </div>
           </div>
 
+          {/* ── Feedback ── */}
           <div id="section-feedback" className="card p-5 scroll-mt-6">
-            <h2 className="font-display text-2xl font-bold text-plum">
-              Recent Feedback
-            </h2>
+            <h2 className="font-display text-2xl font-bold text-plum">Recent Feedback</h2>
             <div className="mt-4 grid gap-3">
               {feedback.length ? (
                 feedback.map((item) => (
                   <article key={item.id} className="rounded-lg bg-cream p-4">
                     <p className="font-bold text-plum">{item.name}</p>
-                    <p className="text-xs font-bold uppercase text-gold">
-                      {item.rating}/5 · {item.outfitType}
-                    </p>
-                    <p className="mt-2 text-sm leading-6 text-ink/68">
-                      {item.message}
-                    </p>
+                    <p className="text-xs font-bold uppercase text-gold">{item.rating}/5 · {item.outfit_type}</p>
+                    <p className="mt-2 text-sm leading-6 text-ink/68">{item.message}</p>
                   </article>
                 ))
               ) : (
@@ -778,35 +576,23 @@ export default function AdminDashboard() {
         </div>
       </div>
 
+      {/* ── Delivered Orders ─────────────────────────────────── */}
       {deliveredOrders.length > 0 && (
         <div className="mt-6 card overflow-hidden">
           <div className="border-b border-plum/10 p-5">
-            <h2 className="font-display text-2xl font-bold text-plum">
-              Previous Orders (Delivered)
-            </h2>
+            <h2 className="font-display text-2xl font-bold text-plum">Previous Orders (Delivered)</h2>
           </div>
           <div className="divide-y divide-plum/10">
             {deliveredOrders.map((order) => (
-              <article
-                key={order.id}
-                className="grid gap-4 p-5 lg:grid-cols-[140px_1fr]"
-              >
-                <img
-                  src={order.fabricImage}
-                  alt="Uploaded fabric"
-                  className="h-36 w-full rounded-lg object-cover"
-                />
+              <article key={order.id} className="grid gap-4 p-5 lg:grid-cols-[140px_1fr]">
+                <img src={order.fabric_image || order.fabricImage} alt="Uploaded fabric" className="h-36 w-full rounded-lg object-cover" />
                 <div>
                   <div className="flex flex-col justify-between gap-3 sm:flex-row">
                     <div>
-                      <p className="text-xs font-bold uppercase text-gold">
-                        {order.id}
-                      </p>
-                      <h3 className="font-display text-2xl font-bold text-plum">
-                        {order.outfit.title}
-                      </h3>
+                      <p className="text-xs font-bold uppercase text-gold">{order.id}</p>
+                      <h3 className="font-display text-2xl font-bold text-plum">{order.outfit?.title || order.outfit_type}</h3>
                       <p className="text-sm text-ink/58">
-                        {order.customerName} · {order.customerEmail}
+                        {order.customer_name || order.user_name} · {order.customer_email || order.user_email}
                       </p>
                     </div>
                     <span className="h-fit rounded-md bg-green-100 px-4 py-2 text-sm font-bold text-green-700">
@@ -815,41 +601,19 @@ export default function AdminDashboard() {
                   </div>
 
                   <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                    <Info label="Price" value={formatPrice(order.price)} />
-                    <Info
-                      label="Phone"
-                      value={order.customerPhone || "N/A"}
-                    />
-                    <Info
-                      label="Neck"
-                      value={order.customization?.neckStyle || "N/A"}
-                    />
-                    <Info
-                      label="Sleeve"
-                      value={order.customization?.sleeveStyle || "N/A"}
-                    />
-                    <Info
-                      label="Fitting"
-                      value={order.customization?.fittingStyle || "N/A"}
-                    />
+                    <Info label="Price"   value={formatPrice(order.price)} />
+                    <Info label="Phone"   value={order.customer_phone || order.customerPhone || "N/A"} />
+                    <Info label="Neck"    value={order.customization?.neckStyle || "N/A"} />
+                    <Info label="Sleeve"  value={order.customization?.sleeveStyle || "N/A"} />
+                    <Info label="Fitting" value={order.customization?.fittingStyle || "N/A"} />
                   </div>
 
                   <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-                    <button
-                      type="button"
-                      onClick={() => handleSendWhatsApp(order)}
-                      className="btn-secondary flex-1"
-                    >
-                      <MessageCircle size={17} />
-                      Send WhatsApp
+                    <button type="button" onClick={() => handleSendWhatsApp(order)} className="btn-secondary flex-1">
+                      <MessageCircle size={17} /> Send WhatsApp
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteOrder(order)}
-                      className="btn-secondary flex-1"
-                    >
-                      <Trash2 size={17} />
-                      Delete Order
+                    <button type="button" onClick={() => handleDeleteOrder(order)} className="btn-secondary flex-1">
+                      <Trash2 size={17} /> Delete Order
                     </button>
                   </div>
                 </div>
@@ -876,7 +640,7 @@ function StatCard({ icon: Icon, label, value, href }) {
       onClick={handleClick}
       className="card flex items-center gap-4 p-5 transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 cursor-pointer no-underline"
     >
-      <span className="grid h-12 w-12 place-items-center rounded-md bg-lavender text-plum transition-colors duration-200 group-hover:bg-plum group-hover:text-white">
+      <span className="grid h-12 w-12 place-items-center rounded-md bg-lavender text-plum">
         <Icon size={22} />
       </span>
       <div>

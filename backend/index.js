@@ -8,6 +8,8 @@ import usersRoutes    from "./routes/users.js";
 import ordersRoutes   from "./routes/orders.js";
 import productsRoutes from "./routes/products.js";
 import feedbackRoutes from "./routes/feedback.js";
+import cartRoutes     from "./routes/cart.js";
+import wishlistRoutes from "./routes/wishlist.js";
 
 // ── App setup ─────────────────────────────────────────────────
 const app  = express();
@@ -41,6 +43,8 @@ app.use("/api/users",    usersRoutes);
 app.use("/api/orders",   ordersRoutes);
 app.use("/api/products", productsRoutes);
 app.use("/api/feedback", feedbackRoutes);
+app.use("/api/cart",     cartRoutes);
+app.use("/api/wishlist", wishlistRoutes);
 
 // ── Health check ──────────────────────────────────────────────
 app.get("/api/health", (_req, res) => {

@@ -5,15 +5,16 @@ import DressPreview from "../components/DressPreview.jsx";
 import EmptyState from "../components/EmptyState.jsx";
 import LoadingSpinner from "../components/LoadingSpinner.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
-
 import { estimatePrice, formatPrice } from "../utils/pricing.js";
-import { addOrder, clearDraft, createId, getDraft } from "../utils/storage.js";
+import { clearDraft, getDraft } from "../utils/storage.js";
+import { createOrder } from "../utils/api.js";
 
 export default function PlaceOrder() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const draft = useMemo(() => getDraft(user.id), [user.id]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
   const [successOrder, setSuccessOrder] = useState(null);
   const [customerPhone, setCustomerPhone] = useState("");
   const [phoneError, setPhoneError] = useState("");
@@ -33,47 +34,43 @@ export default function PlaceOrder() {
     );
   }
 
-  const previewOrder = {
-    id: "Draft",
-    customerName: user.name,
-    outfit: draft.selectedOutfit,
-    fabricImage: draft.fabricImage,
-    measurements: draft.measurements,
-    unit: draft.unit,
-    customization: draft.customization,
-    price,
-    status: "Order Received",
-    createdAt: orderDate.toISOString(),
-  };
-
-  function handleDownloadMeasurements() {
-    // kept for potential future use
-  }
-
-  function handleConfirm() {
+  async function handleConfirm() {
     const digits = customerPhone.replace(/\D/g, "");
     if (digits.length < 10) {
       setPhoneError("Please enter a valid 10-digit mobile number.");
       return;
     }
     setPhoneError("");
+    setError("");
     setLoading(true);
-    setTimeout(() => {
-      const order = {
-        ...previewOrder,
-        id: createId("SA").toUpperCase(),
-        userId: user.id,
-        customerEmail: user.email,
-        customerPhone: digits.length === 10 ? `91${digits}` : digits,
-        createdAt: new Date().toISOString(),
-      };
-      addOrder(order);
-      clearDraft(user.id);
-      setSuccessOrder(order);
-      setLoading(false);
-    }, 700);
-  }
 
+    try {
+      const payload = {
+        outfit_type: draft.selectedOutfit.id,
+        outfit_title: draft.selectedOutfit.title,
+        outfit_category: draft.selectedOutfit.title,
+        total_price: price,
+        neck_style: draft.customization.neckStyle,
+        sleeve_style: draft.customization.sleeveStyle,
+        fitting: draft.customization.fittingStyle,
+        extras: draft.customization.extras || [],
+        measurements: draft.measurements,
+        fabric_image: draft.fabricImage || null,
+        customer_name: user.name,
+        customer_email: user.email,
+        customer_phone: digits.length === 10 ? `91${digits}` : digits,
+        unit: draft.unit || "Inches",
+      };
+
+      const data = await createOrder(payload);
+      clearDraft(user.id);
+      setSuccessOrder(data.order);
+    } catch (err) {
+      setError(err.message || "Failed to place order. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
     <section className="page-shell">
@@ -133,6 +130,12 @@ export default function PlaceOrder() {
               </p>
             )}
           </div>
+
+          {error && (
+            <p className="mt-3 rounded-md bg-rose/10 px-4 py-2 text-xs font-semibold text-rose">
+              {error}
+            </p>
+          )}
 
           <div className="mt-6">
             <button type="button" onClick={handleConfirm} className="btn-primary w-full" disabled={loading}>

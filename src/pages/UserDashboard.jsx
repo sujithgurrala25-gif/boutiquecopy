@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Eye,
@@ -11,39 +11,65 @@ import {
   UserRound,
 } from "lucide-react";
 import EmptyState from "../components/EmptyState.jsx";
+import LoadingSpinner from "../components/LoadingSpinner.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { formatPrice } from "../utils/pricing.js";
 import {
-  addToCart,
-  getCart,
-  getOrders,
-  getProducts,
-  getWishlist,
-  removeFromCart,
-  toggleWishlist,
-} from "../utils/storage.js";
+  addToCartApi,
+  fetchCart,
+  fetchOrders,
+  fetchProducts,
+  fetchWishlist,
+  removeFromCartApi,
+  toggleWishlistApi,
+} from "../utils/api.js";
 
 const tabs = [
-  { id: "browse", label: "Browse Products", icon: ShoppingBag },
-  { id: "details", label: "Product Details", icon: Eye },
-  { id: "cart", label: "Cart", icon: ShoppingCart },
-  { id: "wishlist", label: "Wishlist", icon: Heart },
-  { id: "orders", label: "My Orders", icon: Package },
-  { id: "profile", label: "Profile", icon: UserRound },
+  { id: "browse",   label: "Browse Products",  icon: ShoppingBag },
+  { id: "details",  label: "Product Details",   icon: Eye },
+  { id: "cart",     label: "Cart",              icon: ShoppingCart },
+  { id: "wishlist", label: "Wishlist",          icon: Heart },
+  { id: "orders",   label: "My Orders",         icon: Package },
+  { id: "profile",  label: "Profile",           icon: UserRound },
 ];
 
 export default function UserDashboard() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [products] = useState(() => getProducts());
-  const [cart, setCart] = useState(() => getCart(user.id));
-  const [wishlist, setWishlist] = useState(() => getWishlist(user.id));
-  const [activeTab, setActiveTab] = useState("browse");
-  const [selectedProduct, setSelectedProduct] = useState(() => products[0] || null);
-  const orders = useMemo(() => getOrders().filter((order) => order.userId === user.id), [user.id]);
 
-  function handleLogout() {
-    logout();
+  const [products, setProducts]     = useState([]);
+  const [cart, setCart]             = useState([]);
+  const [wishlist, setWishlist]     = useState([]);
+  const [orders, setOrders]         = useState([]);
+  const [activeTab, setActiveTab]   = useState("browse");
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [loading, setLoading]       = useState(true);
+
+  useEffect(() => {
+    async function loadAll() {
+      try {
+        const [prodData, cartData, wishData, ordData] = await Promise.all([
+          fetchProducts(),
+          fetchCart(),
+          fetchWishlist(),
+          fetchOrders(),
+        ]);
+        setProducts(prodData.products || []);
+        setCart(cartData.cart || []);
+        setWishlist(wishData.wishlist || []);
+        setOrders(ordData.orders || []);
+        setSelectedProduct((prodData.products || [])[0] || null);
+      } catch (err) {
+        console.error("Dashboard load error:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadAll();
+  }, []);
+
+  async function handleLogout() {
+    await logout();
     navigate("/login");
   }
 
@@ -52,12 +78,31 @@ export default function UserDashboard() {
     setActiveTab("details");
   }
 
-  function handleAddToCart(product) {
-    setCart(addToCart(user.id, product));
+  async function handleAddToCart(product) {
+    try {
+      const data = await addToCartApi(product.id);
+      setCart(data.cart || []);
+    } catch (err) {
+      console.error("Add to cart error:", err);
+    }
   }
 
-  function handleWishlist(product) {
-    setWishlist(toggleWishlist(user.id, product));
+  async function handleRemoveFromCart(productId) {
+    try {
+      const data = await removeFromCartApi(productId);
+      setCart(data.cart || []);
+    } catch (err) {
+      console.error("Remove from cart error:", err);
+    }
+  }
+
+  async function handleWishlist(product) {
+    try {
+      const data = await toggleWishlistApi(product.id);
+      setWishlist(data.wishlist || []);
+    } catch (err) {
+      console.error("Wishlist toggle error:", err);
+    }
   }
 
   function isInCart(productId) {
@@ -66,6 +111,14 @@ export default function UserDashboard() {
 
   function isInWishlist(productId) {
     return wishlist.some((item) => item.id === productId);
+  }
+
+  if (loading) {
+    return (
+      <section className="page-shell flex items-center justify-center min-h-[60vh]">
+        <LoadingSpinner label="Loading dashboard" />
+      </section>
+    );
   }
 
   return (
@@ -131,7 +184,7 @@ export default function UserDashboard() {
         <DashboardPanel title="View Product Details">
           {selectedProduct ? (
             <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
-              <img src={selectedProduct.image} alt={selectedProduct.name} className="h-full min-h-[360px] w-full rounded-lg object-cover shadow-aura" />
+              <img src={selectedProduct.image || selectedProduct.image_url} alt={selectedProduct.name} className="h-full min-h-[360px] w-full rounded-lg object-cover shadow-aura" />
               <div className="card p-6">
                 <p className="mb-3 text-sm font-bold uppercase text-gold">{selectedProduct.category}</p>
                 <h2 className="font-display text-4xl font-bold text-plum">{selectedProduct.name}</h2>
@@ -164,7 +217,7 @@ export default function UserDashboard() {
             <ItemGrid
               items={cart}
               actionLabel="Remove"
-              onAction={(product) => setCart(removeFromCart(user.id, product.id))}
+              onAction={(product) => handleRemoveFromCart(product.id)}
             />
           ) : (
             <EmptyState title="Cart is empty" message="Products you add to cart will appear here." actionLabel="Browse Products" actionTo="/user-dashboard" />
@@ -188,10 +241,10 @@ export default function UserDashboard() {
             <div className="grid gap-4">
               {orders.map((order) => (
                 <article key={order.id} className="card grid gap-4 overflow-hidden p-5 md:grid-cols-[140px_1fr_auto] md:items-center">
-                  <img src={order.fabricImage} alt="Fabric" className="h-32 w-full rounded-lg object-cover" />
+                  <img src={order.fabric_image || order.fabricImage} alt="Fabric" className="h-32 w-full rounded-lg object-cover" />
                   <div>
                     <p className="text-xs font-bold uppercase text-gold">{order.id}</p>
-                    <h3 className="font-display text-2xl font-bold text-plum">{order.outfit.title}</h3>
+                    <h3 className="font-display text-2xl font-bold text-plum">{order.outfit?.title || order.outfit_type}</h3>
                     <p className="mt-1 text-sm text-ink/60">{new Date(order.createdAt).toLocaleDateString()}</p>
                   </div>
                   <div className="text-left md:text-right">
@@ -242,7 +295,7 @@ function DashboardPanel({ title, children }) {
 function ProductCard({ product, inCart, inWishlist, onDetails, onCart, onWishlist }) {
   return (
     <article className="card group overflow-hidden">
-      <img src={product.image} alt={product.name} className="h-52 w-full object-cover transition duration-500 group-hover:scale-105" />
+      <img src={product.image || product.image_url} alt={product.name} className="h-52 w-full object-cover transition duration-500 group-hover:scale-105" />
       <div className="p-5">
         <p className="text-xs font-bold uppercase text-gold">{product.category}</p>
         <h3 className="mt-1 font-display text-2xl font-bold text-plum">{product.name}</h3>
@@ -272,7 +325,7 @@ function ItemGrid({ items, actionLabel, onAction }) {
     <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
       {items.map((item) => (
         <article key={item.id} className="card overflow-hidden">
-          <img src={item.image} alt={item.name} className="h-44 w-full object-cover" />
+          <img src={item.image || item.image_url} alt={item.name} className="h-44 w-full object-cover" />
           <div className="p-5">
             <p className="text-xs font-bold uppercase text-gold">{item.category}</p>
             <h3 className="font-display text-xl font-bold text-plum">{item.name}</h3>
