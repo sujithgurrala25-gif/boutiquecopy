@@ -21,20 +21,19 @@ export default function Signup() {
     setForm({ ...form, [event.target.name]: event.target.value });
   }
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
     setError("");
     setLoading(true);
 
-    setTimeout(() => {
-      const result = signup(form);
-      setLoading(false);
-      if (!result.ok) {
-        setError(result.message);
-        return;
-      }
-      navigate("/user-dashboard");
-    }, 450);
+    const result = await signup(form);
+    setLoading(false);
+
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    navigate("/user-dashboard");
   }
 
   return (

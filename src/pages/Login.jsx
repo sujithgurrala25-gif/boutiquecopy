@@ -21,20 +21,19 @@ export default function Login() {
     setForm({ ...form, [event.target.name]: event.target.value });
   }
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
     setError("");
     setLoading(true);
 
-    setTimeout(() => {
-      const result = login(form);
-      setLoading(false);
-      if (!result.ok) {
-        setError(result.message);
-        return;
-      }
-      navigate(dashboardPathFor(result.user), { replace: true });
-    }, 450);
+    const result = await login(form);
+    setLoading(false);
+
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    navigate(dashboardPathFor(result.user), { replace: true });
   }
 
   return (

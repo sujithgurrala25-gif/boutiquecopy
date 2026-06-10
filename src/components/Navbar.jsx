@@ -39,8 +39,8 @@ export default function Navbar() {
   const navigate = useNavigate();
   const navItems = getNavItems(user?.role);
 
-  function handleLogout() {
-    logout();
+  async function handleLogout() {
+    await logout();
     setOpen(false);
     navigate("/");
   }
