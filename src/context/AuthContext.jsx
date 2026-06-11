@@ -1,5 +1,13 @@
-import { createContext, useContext, useMemo, useState } from "react";
-import { authLogin, authLogout, authSignup, getToken, removeToken, setToken } from "../utils/api.js";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { fetchCurrentUser, getToken, removeToken, setToken } from "../utils/api.js";
+import { auth } from "../utils/firebase.js";
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged,
+  updateProfile,
+} from "firebase/auth";
 
 const AuthContext = createContext(null);
 
@@ -27,42 +35,121 @@ export function AuthProvider({ children }) {
     if (getToken()) return readStoredUser();
     return null;
   });
+  const [loading, setLoading] = useState(true);
 
-  /** Sign up a new user via the API */
+  // Sync auth state on mount
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        try {
+          // Force refresh the token to get the latest ID token
+          const token = await firebaseUser.getIdToken(true);
+          setToken(token);
+
+          // Get synced database user profile from backend (which auto-creates it if needed)
+          const data = await fetchCurrentUser();
+          setUser(data.user);
+          storeUser(data.user);
+        } catch (err) {
+          console.error("Error syncing authenticated user with backend:", err);
+          // Fallback user state so app works even if backend connection fails temporarily
+          const fallbackUser = {
+            id: firebaseUser.uid,
+            name: firebaseUser.displayName || firebaseUser.email.split("@")[0],
+            email: firebaseUser.email,
+            role: firebaseUser.email === "admin@stitchaura.com" ? "admin" : "user",
+          };
+          setUser(fallbackUser);
+          storeUser(fallbackUser);
+        }
+      } else {
+        removeToken();
+        clearStoredUser();
+        setUser(null);
+      }
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  /** Sign up a new user via Firebase Auth */
   async function signup({ name, email, password }) {
     try {
-      const data = await authSignup({ name, email, password });
-      setToken(data.token);
-      storeUser(data.user);
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      // Set name as displayName on firebase
+      await updateProfile(userCredential.user, { displayName: name.trim() });
+      
+      const token = await userCredential.user.getIdToken(true);
+      setToken(token);
+
+      // Trigger user profile sync on the backend
+      const data = await fetchCurrentUser();
       setUser(data.user);
+      storeUser(data.user);
+
       return { ok: true, user: data.user };
     } catch (err) {
-      return { ok: false, message: err.message || "Signup failed." };
+      let friendlyMessage = err.message || "Signup failed.";
+      if (err.code === "auth/email-already-in-use") {
+        friendlyMessage = "An account with this email already exists.";
+      } else if (err.code === "auth/weak-password") {
+        friendlyMessage = "Password must be at least 6 characters.";
+      } else if (err.code === "auth/invalid-email") {
+        friendlyMessage = "Please provide a valid email address.";
+      }
+      return { ok: false, message: friendlyMessage };
     }
   }
 
-  /** Log in via the API */
+  /** Log in via Firebase Auth */
   async function login({ email, password }) {
     try {
-      const data = await authLogin({ email, password });
-      setToken(data.token);
-      storeUser(data.user);
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const token = await userCredential.user.getIdToken(true);
+      setToken(token);
+
+      // Trigger user profile sync on the backend
+      const data = await fetchCurrentUser();
       setUser(data.user);
+      storeUser(data.user);
+
       return { ok: true, user: data.user };
     } catch (err) {
-      return { ok: false, message: err.message || "Login failed." };
+      let friendlyMessage = err.message || "Login failed.";
+      if (
+        err.code === "auth/user-not-found" ||
+        err.code === "auth/wrong-password" ||
+        err.code === "auth/invalid-credential"
+      ) {
+        friendlyMessage = "Invalid email or password.";
+      }
+      return { ok: false, message: friendlyMessage };
     }
   }
 
   /** Log out — clear token + cached user */
   async function logout() {
-    try { await authLogout(); } catch { /* ignore */ }
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.error("Firebase signout error:", err);
+    }
     removeToken();
     clearStoredUser();
     setUser(null);
   }
 
   const value = useMemo(() => ({ user, signup, login, logout }), [user]);
+
+  // Loading spinner to avoid flicker of unprotected routes during initialization
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-cream">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-plum border-t-transparent"></div>
+      </div>
+    );
+  }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

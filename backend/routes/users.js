@@ -23,6 +23,17 @@ router.get("/", requireAuth, (req, res) => {
   return res.json({ ok: true, user });
 });
 
+// ── GET /api/users/me ──────────────────────────────────────────
+router.get("/me", requireAuth, (req, res) => {
+  const db = getDb();
+  const user = db.get(
+    "SELECT id, name, email, role, created_at FROM users WHERE id = ?",
+    [req.user.id]
+  );
+  if (!user) return res.status(404).json({ ok: false, message: "User not found." });
+  return res.json({ ok: true, user });
+});
+
 // ── GET /api/users/:id ────────────────────────────────────────
 router.get("/:id", requireAuth, (req, res) => {
   const { id } = req.params;

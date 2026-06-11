@@ -80,6 +80,7 @@ export const deleteFeedback  = (id)         => apiDelete(`/feedback/${id}`);
 
 // ── Users ──────────────────────────────────────────────────────
 export const fetchUsers      = ()           => apiGet("/users");
+export const fetchCurrentUser = ()          => apiGet("/users/me");
 
 // ── Cart ───────────────────────────────────────────────────────
 export const fetchCart          = ()          => apiGet("/cart");
